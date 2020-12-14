@@ -1,8 +1,9 @@
 import { GraphQLServer } from 'graphql-yoga';
+import { v4 as uuidv4 } from 'uuid';
 
 // Scalar Types - ID, Boolean, String, Float, Int - Can only store one value
 
-const users = [
+let users = [
 	{
 		id: '1',
 		name: 'David Warner',
@@ -17,7 +18,7 @@ const users = [
 	}
 ];
 
-const posts = [
+let posts = [
 	{
 		id: '101',
 		title: 'Post One',
@@ -41,7 +42,7 @@ const posts = [
 	}
 ];
 
-const comments = [
+let comments = [
 	{
 		id: '1',
 		text: 'Comment One',
@@ -76,6 +77,34 @@ const typeDefs = `
         post: Post!
         posts(query: String): [Post!]!
         comments: [Comment!]!
+    }
+
+    type Mutation {
+        createUser(data: CreateUserInput!): User!
+        deleteUser(id: ID!): User
+        createPost(data: CreatePostInput!): Post!
+        deletePost(id: ID!): Post
+        createComment(data: CreateCommentInput!): Comment!
+        deleteComment(id: ID!): Comment
+    }
+
+    input CreateUserInput {
+        name: String!
+        email: String!
+        age: Int
+    }
+
+    input CreatePostInput {
+        title: String!
+        body: String!
+        published: Boolean!
+        author: ID!
+    }
+
+    input CreateCommentInput {
+        text: String!
+        author: ID!
+        post: ID!
     }
 
     type User {
@@ -152,17 +181,123 @@ const resolvers = {
 		},
 		comments: () => comments
 	},
+	Mutation: {
+		createUser: (parent, args, ctx, info) => {
+			const emailTaken = users.some((user) => user.email === args.data.email);
+
+			if (emailTaken) {
+				throw new Error('Email taken');
+			}
+
+			// Using babel transform spread
+			const user = {
+				id: uuidv4(),
+				...args.data
+			};
+
+			users.push(user);
+
+			return user;
+		},
+		deleteUser: (parent, args, ctx, info) => {
+			const userIndex = users.findIndex((user) => user.id === args.id);
+
+			if (userIndex < 0) {
+				throw new Error('User Not Found!');
+            }
+            
+            const removedUsers = users.splice(userIndex, 1);
+            posts = posts.filter(post => {
+                const toBeRemoved = post.author === removedUsers[0].id;
+                
+                if (toBeRemoved) {
+                    // Remove the comments from the post that is to be removed
+                    comments = comments.filter(comment => post.id !== comment.post);
+                }
+
+                return !toBeRemoved;
+            });
+
+            // Remove the comments from the user
+            comments = comments.filter(comment => comment.author !== removedUsers[0].id);
+            
+            return removedUsers[0];
+
+		},
+		createPost: (parent, args, ctx, info) => {
+			const isAuthorValid = users.some((user) => user.id === args.data.author);
+
+			if (!isAuthorValid) {
+				throw new Error('Invalid Author');
+			}
+
+			const post = {
+				id: uuidv4(),
+				...args.data
+			};
+
+			posts.push(post);
+
+			return post;
+        },
+        deletePost: (parent, args, ctx, info) => {
+            const postIndex = posts.findIndex(post => post.id === args.id);
+
+            if (postIndex < 0) {
+                throw new Error('Post not found');
+            }
+
+            const deletedPosts = posts.splice(postIndex, 1);
+            comments = comments.filter(comment => comment.post !== deletedPosts[0].id);
+
+            return deletedPosts[0];
+        },
+		createComment: (parent, args, ctx, info) => {
+			const isAuthorValid = users.some((user) => user.id === args.data.author);
+			const isPostValidAndPublished = posts.some((post) => {
+				return post.id === args.data.post && post.published;
+			});
+
+			if (!isAuthorValid) {
+				throw new Error('Invalid Author');
+			}
+
+			if (!isPostValidAndPublished) {
+				throw new Error('Invalid or unpublished post');
+			}
+
+			const comment = {
+				id: uuidv4(),
+				...args.data
+			};
+
+			comments.push(comment);
+
+			return comment;
+        },
+        deleteComment: (parent, args, ctx, info) => {
+            const commentIndex = comments.findIndex(comment => comment.id === args.id);
+
+            if (commentIndex < 0) {
+                throw new Error('Comment Not found!');
+            }
+
+            const removedComments = comments.splice(commentIndex, 1);
+
+            return removedComments[0];
+        }
+	},
 	Post: {
 		author: (parent, args, ctx, info) => {
 			return users.find((user) => {
 				return parent.author === user.id;
 			});
-        },
-        comments: (parent, args, ctx, info) => {
-            return comments.filter(comment => {
-                return comment.post === parent.id
-            });
-        }
+		},
+		comments: (parent, args, ctx, info) => {
+			return comments.filter((comment) => {
+				return comment.post === parent.id;
+			});
+		}
 	},
 	User: {
 		posts: (parent, args, ctx, info) => {
